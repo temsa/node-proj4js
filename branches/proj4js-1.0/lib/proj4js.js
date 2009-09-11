@@ -420,7 +420,7 @@ Proj4js.Proj = Proj4js.Class({
   /**
    * Property: projName
    * The projection class for this projection, e.g. lcc (lambert conformal conic,
-   * or merc for mercator.  These are exactly equicvalent to their Proj4 
+   * or merc for mercator).  These are exactly equivalent to their Proj4 
    * counterparts.
    */
   projName: null,
@@ -444,6 +444,29 @@ Proj4js.Proj = Proj4js.Class({
   * (but not always) EPSG codes.
   */
   initialize: function(srsCode) {
+      this.srsCodeInput = srsCode;
+      // DGR 2008-08-03 : support urn and url
+      if (srsCode.indexOf('urn:') == 0) {
+          //urn:ORIGINATOR:def:crs:CODESPACE:VERSION:ID
+          var urn = srsCode.split(':');
+          if ((urn[1] == 'ogc' || urn[1] =='x-ogc') &&
+              (urn[2] =='def') &&
+              (urn[3] =='crs') &&
+              urn.length == 7) {
+              srsCode = urn[4]+':'+urn[6];
+          }
+      } else if (srsCode.indexOf('http://') == 0) {
+          //url#ID
+          var url = srsCode.split('#');
+          if (url[0].match(/epsg.org/)) {
+            // http://www.epsg.org/#
+            srsCode = 'EPSG:'+url[1];
+          } else if (url[0].match(/RIG.xml/)) {
+            //http://librairies.ign.fr/geoportail/resources/RIG.xml#
+            //http://interop.ign.fr/registers/ign/RIG.xml#
+            srsCode = 'IGNF:'+url[1];
+          }
+      }
       this.srsCode = srsCode.toUpperCase();
       if (this.srsCode.indexOf("EPSG") == 0) {
           this.srsCode = this.srsCode;
@@ -498,7 +521,7 @@ Proj4js.Proj = Proj4js.Class({
  */
     loadFromService: function() {
       //else load from web service
-      var url = Proj4js.defsLookupService +'/' + this.srsAuth +'/'+ this.srsProjNumber + '/proj4js';
+      var url = Proj4js.defsLookupService +'/' + this.srsAuth +'/'+ this.srsProjNumber + '/proj4js/';
       Proj4js.loadScript(url, 
             Proj4js.bind(this.defsLoaded, this),
             Proj4js.bind(this.defsFailed, this),
@@ -535,7 +558,7 @@ Proj4js.Proj = Proj4js.Class({
  */
    defsFailed: function() {
       Proj4js.reportError('failed to load projection definition for: '+this.srsCode);
-      Proj4js.extend(Proj4js.defs[this.srsCode], Proj4js.defs['WGS84']);  //set it to something so it can at least continue
+      Proj4js.defs[this.srsCode] = Proj4js.defs['WGS84'];  //set it to something so it can at least continue
       this.defsLoaded();
     },
 
@@ -616,6 +639,9 @@ Proj4js.Proj = Proj4js.Class({
   parseDefs: function() {
       this.defData = Proj4js.defs[this.srsCode];
       var paramName, paramVal;
+      if (!this.defData) {
+        return;
+      }
       var paramArray=this.defData.split("+");
 
       for (var prop=0; prop<paramArray.length; prop++) {
@@ -646,7 +672,7 @@ Proj4js.Proj = Proj4js.Class({
               case "y_0":    this.y0 = parseFloat(paramVal); break;  // false northing
               case "k_0":    this.k0 = parseFloat(paramVal); break;  // projection scale factor
               case "k":      this.k0 = parseFloat(paramVal); break;  // both forms returned
-              case "R_A":    this.R = true; break;   //Spheroid radius 
+              case "r_a":    this.R_A = true; break;                 // sphere--area of ellipsoid
               case "zone":   this.zone = parseInt(paramVal); break;  // UTM Zone
               case "south":   this.utmSouth = true; break;  // UTM north/south
               case "towgs84":this.datum_params = paramVal.split(","); break;
@@ -696,7 +722,7 @@ Proj4js.Proj = Proj4js.Class({
       this.es = (this.a2-this.b2)/this.a2;  // e ^ 2
       this.e = Math.sqrt(this.es);        // eccentricity
       if (this.R_A) {
-        this.a *= 1. - this.es * (Proj4js.common.SIXTH + this.es * (Proj4js.RA4 + this.es * Proj4js.RA6));
+        this.a *= 1. - this.es * (Proj4js.common.SIXTH + this.es * (Proj4js.common.RA4 + this.es * Proj4js.common.RA6));
         this.a2 = this.a * this.a;
         this.b2 = this.b * this.b;
         this.es = 0.;
@@ -741,9 +767,13 @@ Proj4js.defs = {
   // without requiring a separate .js file
   'WGS84': "+title=long/lat:WGS84 +proj=longlat +ellps=WGS84 +datum=WGS84 +units=degrees",
   'EPSG:4326': "+title=long/lat:WGS84 +proj=longlat +a=6378137.0 +b=6356752.31424518 +ellps=WGS84 +datum=WGS84 +units=degrees",
-  'EPSG:4269': "+title=long/lat:NAD83 +proj=longlat +a=6378137.0 +b=6356752.31414036 +ellps=GRS80 +datum=NAD83 +units=degrees" 
+  'EPSG:4269': "+title=long/lat:NAD83 +proj=longlat +a=6378137.0 +b=6356752.31414036 +ellps=GRS80 +datum=NAD83 +units=degrees",
+  'EPSG:3785': "+title= Google Mercator +proj=merc +a=6378137 +b=6378137 +lat_ts=0.0 +lon_0=0.0 +x_0=0.0 +y_0=0 +k=1.0 +units=m +nadgrids=@null +no_defs"
 };
-//+a=6378137.0 +b=6356752.31424518 +ellps=WGS84 +datum=WGS84",
+Proj4js.defs['GOOGLE'] = Proj4js.defs['EPSG:3785'];
+Proj4js.defs['EPSG:900913'] = Proj4js.defs['EPSG:3785'];
+Proj4js.defs['EPSG:102113'] = Proj4js.defs['EPSG:3785'];
+
 Proj4js.common = {
   PI : 3.141592653589793238, //Math.PI,
   HALF_PI : 1.570796326794896619, //Math.PI*0.5,
@@ -813,7 +843,7 @@ Proj4js.common = {
 /* Function to compute constant small q which is the radius of a 
    parallel of latitude, phi, divided by the semimajor axis. 
 ------------------------------------------------------------*/
-  qsfnz : function(eccent,sinphi,cosphi) {
+  qsfnz : function(eccent,sinphi) {
     var con;
     if (eccent > 1.0e-7) {
       con = eccent * sinphi;
@@ -861,8 +891,7 @@ Proj4js.common = {
   },
 
 // Latitude Isometrique - close to tsfnz ...
-  latiso : function(eccent, phi, sinphi)
-  {
+  latiso : function(eccent, phi, sinphi) {
     if (Math.abs(phi) > this.HALF_PI) return +Number.NaN;
     if (phi==this.HALF_PI) return Number.POSITIVE_INFINITY;
     if (phi==-1.0*this.HALF_PI) return -1.0*Number.POSITIVE_INFINITY;
@@ -888,7 +917,7 @@ Proj4js.common = {
     return phi;
   },
 
-// Needed for Gauss Laborde
+// Needed for Gauss Schreiber
 // Original:  Denis Makarov (info@binarythings.com)
 // Web Site:  http://www.binarythings.com
   sinh : function(x)
@@ -1340,7 +1369,7 @@ var maxiter = 30;
 Proj4js.Point = Proj4js.Class({
 
     /**
-     * Constructor! Proj4js.Point
+     * Constructor: Proj4js.Point
      *
      * Parameters:
      * - x {float} or {Array} either the first coordinates component or
