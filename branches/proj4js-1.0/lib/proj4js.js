@@ -434,6 +434,16 @@ Proj4js.Proj = Proj4js.Class({
    * The datum specified for the projection
    */
   datum: null,
+  /**
+   * Property: x0
+   * The x coordinate origin
+   */
+  x0: 0,
+  /**
+   * Property: y0
+   * The y coordinate origin
+   */
+  y0: 0,
 
   /**
    * Constructor: initialize
@@ -451,9 +461,8 @@ Proj4js.Proj = Proj4js.Class({
           var urn = srsCode.split(':');
           if ((urn[1] == 'ogc' || urn[1] =='x-ogc') &&
               (urn[2] =='def') &&
-              (urn[3] =='crs') &&
-              urn.length == 7) {
-              srsCode = urn[4]+':'+urn[6];
+              (urn[3] =='crs')) {
+              srsCode = urn[4]+':'+urn[urn.length-1];
           }
       } else if (srsCode.indexOf('http://') == 0) {
           //url#ID
@@ -703,7 +712,7 @@ Proj4js.Proj = Proj4js.Class({
       if (this.datumCode && this.datumCode != 'none') {
         var datumDef = Proj4js.Datum[this.datumCode];
         if (datumDef) {
-          this.datum_params = datumDef.towgs84.split(',');
+          this.datum_params = datumDef.towgs84 ? datumDef.towgs84.split(',') : null;
           this.ellps = datumDef.ellipse;
           this.datumName = datumDef.datumName ? datumDef.datumName : this.datumCode;
         }
