@@ -1,0 +1,17 @@
+{ "name" : "proj4js"
+, "description" : "A library for transforming from one GIS projection to another. Ported from proj4js.org for Node"
+, "keywords" : [ "proj4", 'proj4js", "gis" ]
+, "version" : "1.0.1"
+, "homepage" : "http://proj4js.org/"
+, "repository" :
+  { "type" : "git"
+  , "url" : "git://github.com/temsa/node-proj4js.git"
+  }
+, "main" : "index"
+, "engines" : { "node" : "0.4 || 0.5" }
+, "licenses" :
+  [ { "type" : "LGPL"
+    , "url" : "http://www.gnu.org/copyleft/lesser.html"
+    }
+  ]
+}

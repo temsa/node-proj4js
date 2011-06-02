@@ -4,28 +4,44 @@ var fs= require('fs'),
 	async = require('async'),
 	_ = require('underscore'),
 	util = require('mkdirp');
+
+function write (filename, content) {
+	fs.writeFile(filename, content, function onWrite(err) {
+		if (err) throw err;
+		console.log(filename+' saved.');
+	})
+}
 	
 function requirify(filename, content) {
 	content = "var Proj4js = require('proj4js');\
 " + content + "\
-exports = Proj4js";
-
-	fs.writeFile(filename, content, function onWrite(err) {
-		if (err) throw err;
-		console.log(filename+' saved.');
-});
+exports = Proj4js;";
+	write(filename, content);
 }
 
-function nodify() {
+function nodify(filename, content) {
+	content = "var " + content +"\
+exports = Proj4js;";
+	write(filename, content);
 }
 
 var dirs = [__dirname+'/../lib/projCode', __dirname+'/../lib/defs'];
-var destination = __dirname+'/node/lib';
+var destination = __dirname +'/node/lib';
 
 util.mkdirp(destination, 0755, function(err){
 	if(err) throw err;
 
 	async.map(dirs, fs.readdir, treatFiles);
+	//main file
+	fs.readFile (__dirname + '/../lib/proj4js.js', function nodifyMainFile(err, content) {
+		if (err) throw err;
+		nodify(__dirname + '/node/index.js', content);
+	});
+	//package definition
+	fs.readFile (__dirname + '/package.json', function copyPackageJson(err, content) {
+		if (err) throw err;
+		write(__dirname + '/node/package.json', content);
+	});
 })
 
 function treatFiles(err, results){
@@ -42,7 +58,7 @@ function treatFiles(err, results){
 			.value();
 	}).value();
 
-	console.log(diredFiles);	
+//	console.log(diredFiles);	
 
 	// filter & flatten
 	var jsfiles = _(diredFiles).flatten();	
@@ -50,10 +66,10 @@ function treatFiles(err, results){
 	//console.log(jsfiles);
 	async.forEach(jsfiles, function openFiles(filename, callback) {
 			fs.readFile(filename, function prepareFile(err, content){
-					var destinationFile = [destination, filename.replace(/^(.*\/)/,'')].join('/');
-					console.log(destinationFile);
-					requirify( destinationFile, content);
-				});
+				var destinationFile = [destination, filename.replace(/^(.*\/)/,'')].join('/');
+//				console.log(destinationFile);
+				requirify( destinationFile, content);
+			});
 		}, function onError(err){
 			console.error("An error happend while saving files :", err);
 		}
