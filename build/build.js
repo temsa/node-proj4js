@@ -5,6 +5,8 @@ var fs= require('fs'),
 	_ = require('underscore'),
 	util = require('mkdirp');
 
+var projsAndDefs = [];
+
 function write (filename, content) {
 	fs.writeFile(filename, content, function onWrite(err) {
 		if (err) throw err;
@@ -15,13 +17,14 @@ function write (filename, content) {
 function requirify(filename, content) {
 	content = "var Proj4js = require('proj4js');\
 " + content + "\
-exports = Proj4js;";
+module.exports = Proj4js;";
 	write(filename, content);
 }
 
 function nodify(filename, content) {
-	content = "var " + content +"\
-exports = Proj4js;";
+	content = "var " + content +
+		_(projsAndDefs).map(function(f){return "require('./lib/" + f + "')"}).join(';\n') +";\n\
+module.exports = Proj4js;";
 	write(filename, content);
 }
 
@@ -35,7 +38,7 @@ util.mkdirp(destination, 0755, function(err){
 	//main file
 	fs.readFile (__dirname + '/../lib/proj4js.js', function nodifyMainFile(err, content) {
 		if (err) throw err;
-		nodify(__dirname + '/node/index.js', content);
+		nodify(__dirname + '/node/lib/proj4js.js', content);
 	});
 	//package definition
 	fs.readFile (__dirname + '/package.json', function copyPackageJson(err, content) {
@@ -50,7 +53,7 @@ function treatFiles(err, results){
 
 	// prefix .js files by dirname and remove other files from the list
 	var diredFiles = _(dirs).chain().zip(results).map(function(dirAndFiles){
-		var dir = dirAndFiles[0], files = dirAndFiles[1];
+		var dir = dirAndFiles[0], files = projsAndDefs = dirAndFiles[1];
 		return _(files)
 			.chain()
 				.select(function(filename){return filename.search(/\.js$/) !== -1})
@@ -65,13 +68,12 @@ function treatFiles(err, results){
 	
 	//console.log(jsfiles);
 	async.forEach(jsfiles, function openFiles(filename, callback) {
-			fs.readFile(filename, function prepareFile(err, content){
-				var destinationFile = [destination, filename.replace(/^(.*\/)/,'')].join('/');
+		fs.readFile(filename, function prepareFile(err, content){
+			var destinationFile = [destination, filename.replace(/^(.*\/)/,'')].join('/');
 //				console.log(destinationFile);
-				requirify( destinationFile, content);
-			});
-		}, function onError(err){
-			console.error("An error happend while saving files :", err);
-		}
-	);
+			requirify( destinationFile, content);
+		});
+	}, function onError(err){
+		console.error("An error happend while saving files :", err);
+	});
 }
