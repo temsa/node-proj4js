@@ -10,7 +10,7 @@
     "url": "git://github.com/temsa/node-proj4js.git"
   },
   "directories": {"lib": "lib"},
-  "main": "index.js",
+  "main": "lib/proj4js.js",
   "engines" : { "node" : "0.4 || 0.5" },
   "licenses" : [ { "type" : "LGPL", "url" : "http://www.gnu.org/copyleft/lesser.html" } ],
   "dependencies": {},
