@@ -5,7 +5,6 @@ var fs= require('fs'),
 	_ = require('underscore'),
 	util = require('mkdirp');
 
-var projsAndDefs = [];
 
 function write (filename, content) {
 	fs.writeFile(filename, content, function onWrite(err) {
@@ -15,31 +14,46 @@ function write (filename, content) {
 }
 	
 function requirify(filename, content) {
-	content = "var Proj4js = require('proj4js');\
+	content = "var Proj4js = require('../proj4js');\
 " + content + "\
 module.exports = Proj4js;";
 	write(filename, content);
 }
 
 function nodify(filename, content) {
-	content = "var " + content +
-		_(projsAndDefs).map(function(f){return "require('./lib/" + f + "')"}).join(';\n') +";\n\
-module.exports = Proj4js;";
+	content = "var " + content +"\n\
+Proj4js.getScriptLocation = function(){return './'};\n\
+Proj4js.loadScript = function(url, onload, onfail, check){onload(require(url));}\n\
+module.exports = Proj4js;\n" ;
 	write(filename, content);
 }
 
-var dirs = [__dirname+'/../lib/projCode', __dirname+'/../lib/defs'];
-var destination = __dirname +'/node/lib';
+var origin = __dirname+'/../lib/';
+var subdirs = ['projCode', 'defs'];
+var dirs = _(subdirs).map(function(dir){return origin+dir});
+
+var destination = __dirname +'/node/lib/';
 
 util.mkdirp(destination, 0755, function(err){
 	if(err) throw err;
+	
+	//create subdirs then manage their files
+	var	destinations = _(subdirs).map(function(dir){return destination + dir});
+//	console.log(destinations);
+	
+	async.map( destinations,
+	
+		 function(dest, callback){return util.mkdirp(dest, 0755, callback)},
+		 
+		 function() { async.map( dirs, fs.readdir, treatFiles)	});
+	
 
-	async.map(dirs, fs.readdir, treatFiles);
 	//main file
 	fs.readFile (__dirname + '/../lib/proj4js.js', function nodifyMainFile(err, content) {
 		if (err) throw err;
 		nodify(__dirname + '/node/lib/proj4js.js', content);
 	});
+
 	//package definition
 	fs.readFile (__dirname + '/package.json', function copyPackageJson(err, content) {
 		if (err) throw err;
@@ -47,18 +61,18 @@ util.mkdirp(destination, 0755, function(err){
 	});
 })
 
-function treatFiles(err, results){
+function treatFiles(err, results/*array (sized like subdir) of array of filenames for a dir*/){
 	if(err) throw err;
 //	console.log(results);
 
 	// prefix .js files by dirname and remove other files from the list
-	var diredFiles = _(dirs).chain().zip(results).map(function(dirAndFiles){
-		var dir = dirAndFiles[0], files = projsAndDefs = dirAndFiles[1];
-		return _(files)
-			.chain()
-				.select(function(filename){return filename.search(/\.js$/) !== -1})
-				.map(function setFileName(file){return dir+'/'+file})		
-			.value();
+	var diredFiles = _(dirs).chain()
+		.zip(results)
+		.map(function(dirAndFiles){
+			var dir = dirAndFiles[0],
+				files = _(dirAndFiles[1]).select(function(filename){return filename.search(/\.js$/) !== -1});
+					
+			return _(files).map(function setFileName(file){return dir+'/'+file});
 	}).value();
 
 //	console.log(diredFiles);	
@@ -68,9 +82,9 @@ function treatFiles(err, results){
 	
 	//console.log(jsfiles);
 	async.forEach(jsfiles, function openFiles(filename, callback) {
-		fs.readFile(filename, function prepareFile(err, content){
-			var destinationFile = [destination, filename.replace(/^(.*\/)/,'')].join('/');
-//				console.log(destinationFile);
+		fs.readFile(filename, function prepareFile(err, content){			
+			var destinationFile = filename.replace(origin, destination);
+				console.log(destinationFile);
 			requirify( destinationFile, content);
 		});
 	}, function onError(err){
