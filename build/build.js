@@ -22,6 +22,7 @@ module.exports = Proj4js;";
 
 function nodify(filename, content) {
 	content = "var " + content +"\n\
+var alert = console.error;\n\
 Proj4js.getScriptLocation = function(){return './'};\n\
 Proj4js.loadScript = function(url, onload, onfail, check){onload(require(url));}\n\
 module.exports = Proj4js;\n" ;
