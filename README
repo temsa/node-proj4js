@@ -7,25 +7,16 @@ Without cloning this project you can use it directly using npm :
 In your JS :
  var Proj4js = require("proj4js");
 
-## Exemple ##
+## Usage example##
 
  var Proj4js = require("proj4js"),
-     proj = new Proj4js.Proj("");
+     proj = new Proj4js.Proj("ESPG:2154");
      
 console.log(Proj4js.transform(Proj4js.WGS84, proj, new Proj4js.Point([45,5])));
 
-## Troubleshoot ##
+## Documentation ##
 
-Getting an error like this ?
-
-  node.js:116
-          throw e; // process.nextTick error, or 'error' event on first tick
-          ^
-  ReferenceError: document is not defined
-
-As Proj4JS was targetting the browser, it tries to dynamically get any Projection that isn't yet defined. So you are probably just trying to use some not defined projection ;)
-
-This may be fixed in a further revision
+For more documentation on Proj4JS usage, please read the original proj4js documentation : http://trac.osgeo.org/proj4js/
 
 ## "build" node.js version ##
  git clone git://github.com/temsa/node-proj4js.git
