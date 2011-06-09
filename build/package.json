@@ -3,7 +3,7 @@
   "name": "proj4js",
   "keywords" : [ "proj4", "proj4js", "gis" ],
   "description": "A library providing methods for coordinate transformations between map projections and longitude/latitude, including datum transformations. Ported from proj4js.org for Node",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "homepage": "http://proj4js.org",
   "repository": {
     "type": "git",
