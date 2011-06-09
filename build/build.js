@@ -31,10 +31,10 @@ module.exports = Proj4js;\n" ;
 var origin = __dirname+'/../lib/';
 var subdirs = ['projCode', 'defs'];
 var dirs = _(subdirs).map(function(dir){return origin+dir});
+var destdir = __dirname + '/node/lib';
+var destination = destdir +'/';
 
-var destination = __dirname +'/node/lib/';
-
-util.mkdirp(destination, 0755, function(err){
+util.mkdirp(destdir, 0755, function(err){
 	if(err) throw err;
 	
 	//create subdirs then manage their files
