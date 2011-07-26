@@ -80,17 +80,26 @@ Proj4js = {
     *     projected Cartesian (x,y), but should always have x,y properties.
     */
     transform: function(source, dest, point) {
-        if (!source.readyToUse || !dest.readyToUse) {
-            this.reportError("Proj4js initialization for "+source.srsCode+" not yet complete");
+        if (!source.readyToUse) {
+            this.reportError("Proj4js initialization for:"+source.srsCode+" not yet complete");
+            return point;
+        }
+        if (!dest.readyToUse) {
+            this.reportError("Proj4js initialization for:"+dest.srsCode+" not yet complete");
             return point;
         }
         
         // Workaround for Spherical Mercator
-        if ((source.srsProjNumber =="900913" && dest.datumCode != "WGS84") ||
-            (dest.srsProjNumber == "900913" && source.datumCode != "WGS84")) {
+        if ((source.srsProjNumber =="900913" && dest.datumCode != "WGS84" && !dest.datum_params) ||
+            (dest.srsProjNumber == "900913" && source.datumCode != "WGS84" && !source.datum_params)) {
             var wgs84 = Proj4js.WGS84;
             this.transform(source, wgs84, point);
             source = wgs84;
+        }
+
+        // DGR, 2010/11/12
+        if (source.axis!="enu") {
+            this.adjust_axis(source,false,point);
         }
 
         // Transform source points to long/lat, if they aren't already.
@@ -129,6 +138,12 @@ Proj4js = {
                 point.y /= dest.to_meter;
             }
         }
+
+        // DGR, 2010/11/12
+        if (dest.axis!="enu") {
+            this.adjust_axis(dest,true,point);
+        }
+
         return point;
     }, // transform()
 
@@ -212,6 +227,50 @@ Proj4js = {
       }
       return point;
     }, // cs_datum_transform
+
+    /**
+     * Function: adjust_axis
+     * Normalize or de-normalized the x/y/z axes.  The normal form is "enu"
+     * (easting, northing, up).
+     * Parameters:
+     * crs {Proj4js.Proj} the coordinate reference system
+     * denorm {Boolean} when false, normalize
+     * point {Object} the coordinates to adjust
+     */
+    adjust_axis: function(crs, denorm, point) {
+        var xin= point.x, yin= point.y, zin= point.z || 0.0;
+        var v, t;
+        for (var i= 0; i<3; i++) {
+            if (denorm && i==2 && point.z===undefined) { continue; }
+                 if (i==0) { v= xin; t= 'x'; }
+            else if (i==1) { v= yin; t= 'y'; }
+            else           { v= zin; t= 'z'; }
+            switch(crs.axis[i]) {
+            case 'e':
+                point[t]= v;
+                break;
+            case 'w':
+                point[t]= -v;
+                break;
+            case 'n':
+                point[t]= v;
+                break;
+            case 's':
+                point[t]= -v;
+                break;
+            case 'u':
+                if (point[t]!==undefined) { point.z= v; }
+                break;
+            case 'd':
+                if (point[t]!==undefined) { point.z= -v; }
+                break;
+            default :
+                alert("ERROR: unknow axis ("+crs.axis[i]+") - check definition of "+src.projName);
+                return null;
+            }
+        }
+        return point;
+    },
 
     /**
      * Function: reportError
@@ -313,7 +372,8 @@ Proj4js = {
     
 /**
  * The following properties and methods handle dynamic loading of JSON objects.
- *
+ */
+ 
     /**
      * Property: scriptName
      * {String} The filename of this script without any path.
@@ -459,17 +519,47 @@ Proj4js.Proj = Proj4js.Class({
    * The y coordinate origin
    */
   y0: 0,
+  /**
+   * Property: localCS
+   * Flag to indicate if the projection is a local one in which no transforms
+   * are required.
+   */
+  localCS: false,
 
   /**
-   * Constructor: initialize
-   * Constructor for Proj4js.Proj objects
+  * Property: queue
+  * Buffer (FIFO) to hold callbacks waiting to be called when projection loaded.
+  */
+  queue: null,
+
+  /**
+  * Constructor: initialize
+  * Constructor for Proj4js.Proj objects
   *
   * Parameters:
   * srsCode - a code for map projection definition parameters.  These are usually
   * (but not always) EPSG codes.
   */
-  initialize: function(srsCode) {
+  initialize: function(srsCode, callback) {
       this.srsCodeInput = srsCode;
+      
+      //Register callbacks prior to attempting to process definition
+      this.queue = [];
+      if( callback ){
+           this.queue.push( callback );
+      }
+      
+      //check to see if this is a WKT string
+      if ((srsCode.indexOf('GEOGCS') >= 0) ||
+          (srsCode.indexOf('GEOCCS') >= 0) ||
+          (srsCode.indexOf('PROJCS') >= 0) ||
+          (srsCode.indexOf('LOCAL_CS') >= 0)) {
+            this.parseWKT(srsCode);
+            this.deriveConstants();
+            this.loadProjCode(this.projName);
+            return;
+      }
+      
       // DGR 2008-08-03 : support urn and url
       if (srsCode.indexOf('urn:') == 0) {
           //urn:ORIGINATOR:def:crs:CODESPACE:VERSION:ID
@@ -510,6 +600,7 @@ Proj4js.Proj = Proj4js.Class({
           this.srsAuth = '';
           this.srsProjNumber = this.srsCode;
       }
+      
       this.loadProjDefinition();
   },
   
@@ -653,7 +744,160 @@ Proj4js.Proj = Proj4js.Class({
       Proj4js.extend(this, Proj4js.Proj[this.projName]);
       this.init();
       this.readyToUse = true;
+      if( this.queue ) {
+        var item;
+        while( (item = this.queue.shift()) ) {
+          item.call( this, this );
+        }
+      }
   },
+
+/**
+ * Function: parseWKT
+ * Parses a WKT string to get initialization parameters
+ *
+ */
+ wktRE: /^(\w+)\[(.*)\]$/,
+ parseWKT: function(wkt) {
+    var wktMatch = wkt.match(this.wktRE);
+    if (!wktMatch) return;
+    var wktObject = wktMatch[1];
+    var wktContent = wktMatch[2];
+    var wktTemp = wktContent.split(",");
+    var wktName;
+    if (wktObject.toUpperCase() == "TOWGS84") {
+      wktName = wktObject;  //no name supplied for the TOWGS84 array
+    } else {
+      wktName = wktTemp.shift();
+    }
+    wktName = wktName.replace(/^\"/,"");
+    wktName = wktName.replace(/\"$/,"");
+    
+    /*
+    wktContent = wktTemp.join(",");
+    var wktArray = wktContent.split("],");
+    for (var i=0; i<wktArray.length-1; ++i) {
+      wktArray[i] += "]";
+    }
+    */
+    
+    var wktArray = new Array();
+    var bkCount = 0;
+    var obj = "";
+    for (var i=0; i<wktTemp.length; ++i) {
+      var token = wktTemp[i];
+      for (var j=0; j<token.length; ++j) {
+        if (token.charAt(j) == "[") ++bkCount;
+        if (token.charAt(j) == "]") --bkCount;
+      }
+      obj += token;
+      if (bkCount === 0) {
+        wktArray.push(obj);
+        obj = "";
+      } else {
+        obj += ",";
+      }
+    }
+    
+    //do something based on the type of the wktObject being parsed
+    //add in variations in the spelling as required
+    switch (wktObject) {
+      case 'LOCAL_CS':
+        this.projName = 'identity'
+        this.localCS = true;
+        this.srsCode = wktName;
+        break;
+      case 'GEOGCS':
+        this.projName = 'longlat'
+        this.geocsCode = wktName;
+        if (!this.srsCode) this.srsCode = wktName;
+        break;
+      case 'PROJCS':
+        this.srsCode = wktName;
+        break;
+      case 'GEOCCS':
+        break;
+      case 'PROJECTION':
+        this.projName = Proj4js.wktProjections[wktName]
+        break;
+      case 'DATUM':
+        this.datumName = wktName;
+        break;
+      case 'LOCAL_DATUM':
+        this.datumCode = 'none';
+        break;
+      case 'SPHEROID':
+        this.ellps = wktName;
+        this.a = parseFloat(wktArray.shift());
+        this.rf = parseFloat(wktArray.shift());
+        break;
+      case 'PRIMEM':
+        this.from_greenwich = parseFloat(wktArray.shift()); //to radians?
+        break;
+      case 'UNIT':
+        this.units = wktName;
+        this.unitsPerMeter = parseFloat(wktArray.shift());
+        break;
+      case 'PARAMETER':
+        var name = wktName.toLowerCase();
+        var value = parseFloat(wktArray.shift());
+        //there may be many variations on the wktName values, add in case
+        //statements as required
+        switch (name) {
+          case 'false_easting':
+            this.x0 = value;
+            break;
+          case 'false_northing':
+            this.y0 = value;
+            break;
+          case 'scale_factor':
+            this.k0 = value;
+            break;
+          case 'central_meridian':
+            this.long0 = value*Proj4js.common.D2R;
+            break;
+          case 'latitude_of_origin':
+            this.lat0 = value*Proj4js.common.D2R;
+            break;
+          case 'more_here':
+            break;
+          default:
+            break;
+        }
+        break;
+      case 'TOWGS84':
+        this.datum_params = wktArray;
+        break;
+      //DGR 2010-11-12: AXIS
+      case 'AXIS':
+        var name= wktName.toLowerCase();
+        var value= wktArray.shift();
+        switch (value) {
+          case 'EAST' : value= 'e'; break;
+          case 'WEST' : value= 'w'; break;
+          case 'NORTH': value= 'n'; break;
+          case 'SOUTH': value= 's'; break;
+          case 'UP'   : value= 'u'; break;
+          case 'DOWN' : value= 'd'; break;
+          case 'OTHER':
+          default     : value= ' '; break;//FIXME
+        }
+        if (!this.axis) { this.axis= "enu"; }
+        switch(name) {
+          case 'X': this.axis=                         value + this.axis.substr(1,2); break;
+          case 'Y': this.axis= this.axis.substr(0,1) + value + this.axis.substr(2,1); break;
+          case 'Z': this.axis= this.axis.substr(0,2) + value                        ; break;
+          default : break;
+        }
+      case 'MORE_HERE':
+        break;
+      default:
+        break;
+    }
+    for (var i=0; i<wktArray.length; ++i) {
+      this.parseWKT(wktArray[i]);
+    }
+ },
 
 /**
  * Function: parseDefs
@@ -709,6 +953,16 @@ Proj4js.Proj = Proj4js.Class({
                                 Proj4js.PrimeMeridian[paramVal] : parseFloat(paramVal);
                              this.from_greenwich *= Proj4js.common.D2R; 
                              break;
+              // DGR 2010-11-12: axis
+              case "axis":   paramVal = paramVal.replace(/\s/gi,"");
+                             var legalAxis= "ewnsud";
+                             if (paramVal.length==3 &&
+                                 legalAxis.indexOf(paramVal.substr(0,1))!=-1 &&
+                                 legalAxis.indexOf(paramVal.substr(1,1))!=-1 &&
+                                 legalAxis.indexOf(paramVal.substr(2,1))!=-1) {
+                                this.axis= paramVal;
+                             } //FIXME: be silent ?
+                             break
               case "no_defs": break; 
               default: //alert("Unrecognized parameter: " + paramName);
           } // switch()
@@ -753,6 +1007,8 @@ Proj4js.Proj = Proj4js.Class({
       }
       this.ep2=(this.a2-this.b2)/this.b2; // used in geocentric
       if (!this.k0) this.k0 = 1.0;    //default value
+      //DGR 2010-11-12: axis
+      if (!this.axis) { this.axis= "enu"; }
 
       this.datum = new Proj4js.datum(this);
   }
@@ -771,6 +1027,7 @@ Proj4js.Proj.longlat = {
     return pt;
   }
 };
+Proj4js.Proj.identity = Proj4js.Proj.longlat;
 
 /**
   Proj4js.defs is a collection of coordinate system definition objects in the 
@@ -854,7 +1111,7 @@ Proj4js.common = {
     var eccnth = .5 * eccent;
     var con, dphi;
     var phi = this.HALF_PI - 2 * Math.atan(ts);
-    for (i = 0; i <= 15; i++) {
+    for (var i = 0; i <= 15; i++) {
       con = eccent * Math.sin(phi);
       dphi = this.HALF_PI - 2 * Math.atan(ts *(Math.pow(((1.0 - con)/(1.0 + con)),eccnth))) - phi;
       phi += dphi;
@@ -1169,7 +1426,7 @@ var maxiter = 30;
 
 /* --------------------------------------------------------------
  * Following iterative algorithm was developped by
- * "Institut für Erdmessung", University of Hannover, July 1988.
+ * "Institut fï¿½r Erdmessung", University of Hannover, July 1988.
  * Internet: www.ife.uni-hannover.de
  * Iterative computation of CPHI,SPHI and Height.
  * Iteration of CPHI and SPHI to 10**-12 radian resp.
@@ -1406,7 +1663,7 @@ Proj4js.Point = Proj4js.Class({
         this.x = x[0];
         this.y = x[1];
         this.z = x[2] || 0.0;
-      } else if (typeof x == 'string') {
+      } else if (typeof x == 'string' && typeof y == 'undefined') {
         var coords = x.split(',');
         this.x = parseFloat(coords[0]);
         this.y = parseFloat(coords[1]);
@@ -1530,6 +1787,20 @@ Proj4js.Datum = {
 
 Proj4js.WGS84 = new Proj4js.Proj('WGS84');
 Proj4js.Datum['OSB36'] = Proj4js.Datum['OSGB36']; //as returned from spatialreference.org
+
+//lookup table to go from the projection name in WKT to the Proj4js projection name
+//build this out as required
+Proj4js.wktProjections = {
+  "Lambert Tangential Conformal Conic Projection": "lcc",
+  "Mercator": "merc",
+  "Popular Visualisation Pseudo Mercator": "merc",
+  "Transverse_Mercator": "tmerc",
+  "Transverse Mercator": "tmerc",
+  "Lambert Azimuthal Equal Area": "laea",
+  "Universal Transverse Mercator System": "utm"
+};
+
+
 /* ======================================================================
     projCode/aea.js
    ====================================================================== */
@@ -2261,7 +2532,7 @@ Proj4js.Proj.eqdc = {
     var theta = 0.0;
     if (rh1 != 0.0) theta = Math.atan2(con *p.x, con *p.y);
     var ml = this.g - rh1 /this.a;
-    var lat = this.phi3z(this.ml,this.e0,this.e1,this.e2,this.e3);
+    var lat = this.phi3z(ml,this.e0,this.e1,this.e2,this.e3);
     var lon = Proj4js.common.adjust_lon(this.long0 + theta / this.ns);
 
      p.x=lon;
@@ -2595,7 +2866,7 @@ Proj4js.Proj.ortho = {
       lat = this.lat0; 
     }
     lat = Proj4js.common.asinz(cosz * this.sin_p14 + (p.y * sinz * this.cos_p14)/rh);
-    con = Math.abs(lat0) - Proj4js.common.HALF_PI;
+    con = Math.abs(this.lat0) - Proj4js.common.HALF_PI;
     if (Math.abs(con) <= Proj4js.common.EPSLN) {
        if (this.lat0 >= 0) {
           lon = Proj4js.common.adjust_lon(this.long0 + Math.atan2(p.x, -p.y));
@@ -2604,9 +2875,6 @@ Proj4js.Proj.ortho = {
        }
     }
     con = cosz - this.sin_p14 * Math.sin(lat);
-    if ((Math.abs(con) >= Proj4js.common.EPSLN) || (Math.abs(x) >= Proj4js.common.EPSLN)) {
-       lon = Proj4js.common.adjust_lon(this.long0 + Math.atan2((p.x * sinz * this.cos_p14), (con * rh)));
-    }
     p.x=lon;
     p.y=lat;
     return p;
@@ -2644,7 +2912,7 @@ Proj4js.Proj.somerc = {
     var flattening = 1 / invF;
     var e2 = 2 * flattening - Math.pow(flattening, 2);
     var e = this.e = Math.sqrt(e2);
-    this.R = semiMajorAxis * Math.sqrt(1 - e2) / (1 - e2 * Math.pow(sinPhy0, 2.0));
+    this.R = this.k0 * semiMajorAxis * Math.sqrt(1 - e2) / (1 - e2 * Math.pow(sinPhy0, 2.0));
     this.alpha = Math.sqrt(1 + e2 / (1 - e2) * Math.pow(Math.cos(phy0), 4.0));
     this.b0 = Math.asin(sinPhy0 / this.alpha);
     this.K = Math.log(Math.tan(Math.PI / 4.0 + this.b0 / 2.0))
@@ -2933,6 +3201,8 @@ Proj4js.Proj.stere = {
     		lon = (x == 0. && y == 0.) ? 0. : Math.atan2(x, y);
     		break;
     	}
+        p.x = Proj4js.common.adjust_lon(lon + this.long0);
+        p.y = lat;
     } else {
     	rho = Math.sqrt(x*x + y*y);
     	switch (this.mode) {
@@ -3376,6 +3646,7 @@ Proj4js.Proj.gnom = {
     this.cos_p14=Math.cos(this.lat0);
     // Approximation for projecting points to the horizon (infinity)
     this.infinity_dist = 1000 * this.a;
+    this.rc = 1;
   },
 
 
@@ -3668,7 +3939,7 @@ Proj4js.Proj.vandg = {
 		if (p.y >= 0) {
 			lat = (-m1 *Math.cos(th1 + Proj4js.common.PI / 3.0) - c2 / 3.0 / c3) * Proj4js.common.PI;
 		} else {
-			lat = -(-m1 * Math.cos(th1 + PI / 3.0) - c2 / 3.0 / c3) * Proj4js.common.PI;
+			lat = -(-m1 * Math.cos(th1 + Proj4js.common.PI / 3.0) - c2 / 3.0 / c3) * Proj4js.common.PI;
 		}
 
 		if (Math.abs(xx) < Proj4js.common.EPSLN) {
@@ -4410,8 +4681,8 @@ Proj4js.Proj.lcc = {
 
     var rh1, con, ts;
     var lat, lon;
-    x = (p.x - this.x0)/this.k0;
-    y = (this.rh - (p.y - this.y0)/this.k0);
+    var x = (p.x - this.x0)/this.k0;
+    var y = (this.rh - (p.y - this.y0)/this.k0);
     if (this.ns > 0) {
       rh1 = Math.sqrt (x * x + y * y);
       con = 1.0;
@@ -4546,6 +4817,7 @@ Proj4js.Proj.laea = {
         cosphi = Math.cos(phi);
         coslam = Math.cos(lam);
         switch (this.mode) {
+          case this.OBLIQ:
           case this.EQUIT:
             y = (this.mode == this.EQUIT) ? 1. + cosphi * coslam : 1. + this.sinph0 * sinphi + this.cosph0 * cosphi * coslam;
             if (y <= Proj4js.common.EPSLN) {
