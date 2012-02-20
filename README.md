@@ -6,6 +6,7 @@ Without cloning this project you can use it directly using npm :
  npm install proj4js
 ```
 In your JS :
+
 ```javascript
  var Proj4js = require("proj4js");
 ```
