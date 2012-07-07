@@ -37,8 +37,7 @@ var Proj4js = require("proj4js"),
     proj = new Proj4js.Proj("EPSG:2192", function() {
         console.log(Proj4js.transform(Proj4js.WGS84, proj, new Proj4js.Point([45,5])));
 })
-     
-console.log(Proj4js.transform(Proj4js.WGS84, proj, new Proj4js.Point([45,5])));
+
 //returns
 //{ x: 6295336.596034983,
 //  y: -1241636.8411306776,
